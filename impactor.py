@@ -20,16 +20,15 @@ class Impactor(object):
     def __init__(self, journal_db_file=None, year=2014):
         logging.debug('journal_db_file={}, year={}'.format(journal_db_file, year))
 
-        self.year = year
-        self.journal_db_file = journal_db_file
         self.journal_data = None
+        self.journal_db_file = journal_db_file
         self.matches = set()
+        self.year = year
 
+        assert year in (2014, )  # won't bother doing past years, but might updated for future years...
         self.base_url = self.BASE_URL_PREFIX + str(year) + self.BASE_URL_SUFFIX
         self.url_regex = self.URL_REGEX_PREFIX + str(year) + self.URL_REGEX_SUFFIX
         self.re = re.compile(self.url_regex)
-        assert self.re.match(self.base_url)
-        assert self.re.match(self.BASE_URL_PREFIX + str(year) + '_A' + self.BASE_URL_SUFFIX)
 
         self.load()
         self.save()
@@ -75,6 +74,7 @@ class Impactor(object):
                 pass
         # If cannot load from file, load from URL
         if self.journal_data is None:
+            logging.info('Fetching database from citefactor.org...')
             self.journal_data = self.get_all_journal_data()
 
     def save(self):
@@ -86,20 +86,18 @@ class Impactor(object):
             except:
                 pass
 
-    def get_all_urls(self, base_url=None):
-        if base_url is None:
-            base_url = self.base_url
-        main_page_content = urllib2.urlopen(base_url).read()
+    def get_all_urls(self):
+        main_page_content = urllib2.urlopen(self.base_url).read()
         soup = BeautifulSoup(main_page_content)
         soup.prettify()  # necessary?
-        return [base_url,] + [anchor['href'] for anchor in soup.find_all('a', href=self.re)]
+        return [self.base_url,] + [anchor['href'] for anchor in soup.find_all('a', href=self.re)]
 
     def get_journal_table(self, url):
         content = urllib2.urlopen(url).read()
         soup = BeautifulSoup(content)
         soup.prettify()  # necessary?
         t = soup.table
-        caption_re = re.compile(r'^Impact Factor ' + str(self.year))
+        caption_re = re.compile(r'^Impact Factor ' + str(self.year))  # works for Year==2014 only
         while t is not None:
             if t.caption is None or t.caption.string is None or caption_re.match(t.caption.string) is None:
                 t = t.find_next()
@@ -124,21 +122,21 @@ class Impactor(object):
         for url in self.get_all_urls():
             table = self.get_journal_table(url)
             journals.update(self.get_journal_data(table))
-        logging.info('imported {} journal entries from citefactor.org database'.format(len(journals)))
+        logging.info('imported {} journal entries from citefactor.org'.format(len(journals)))
         return journals
 
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--year', '-y', default=2014, type=int)
-    parser.add_argument('--db', default=None, type=str, help='file to load/save journal data')
-    parser.add_argument('search', nargs='*', help='journal ISSNs')
-    parser.add_argument('--debug', '-d', default=False, action='store_true')
+    parser.add_argument('search', nargs='*', help='journal ISSNs and/or partial title matches (case insensitive)')
+    parser.add_argument('--db', default=None, type=str, help='journal database file (created from online data if missing/invalid)')
     parser.add_argument('--sort', '-s', default='JOURNAL', help='sort by column')
+    parser.add_argument('--year', '-y', default=2014, type=int, help='year for citefactor URL (currently only 2014 supported)')
+
+    parser.add_argument('--debug', '-d', default=False, action='store_true')
     args = parser.parse_args()
 
-    # Logging setup
     if args.debug is True:
         logging.basicConfig(level=logging.DEBUG)
     else:
@@ -146,6 +144,7 @@ if __name__ == '__main__':
 
     logging.debug(args)
 
+    # Load, search, print
     i = Impactor(year=args.year, journal_db_file=args.db)
     i.match(args.search)
     i.print_table(args.sort)
